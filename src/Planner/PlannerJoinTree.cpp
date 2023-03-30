@@ -1061,6 +1061,14 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(const QueryTreeNodePtr & join_table_
     const Block & right_header = right_plan.getCurrentDataStream().header;
     auto join_algorithm = chooseJoinAlgorithm(table_join, join_node.getRightTableExpression(), left_header, right_header, planner_context);
 
+    if (join_clauses_and_actions.mixed_join_expressions_actions)
+    {
+        auto expression_actions = std::make_shared<ExpressionActions>(
+            join_clauses_and_actions.mixed_join_expressions_actions,
+            ExpressionActionsSettings::fromContext(query_context, CompileExpressions::no));
+        join_algorithm->addMixedFilterCondition(expression_actions);
+    }
+
     auto result_plan = QueryPlan();
 
     if (join_algorithm->isFilled())

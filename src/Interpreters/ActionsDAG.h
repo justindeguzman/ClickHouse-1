@@ -103,7 +103,10 @@ private:
     NodeRawConstPtrs inputs;
     NodeRawConstPtrs outputs;
 
+    /// Remove unknown input columns from output.
     bool project_input = false;
+
+    /// Indicates if `project()` method was called.
     bool projected_output = false;
 
 public:
@@ -260,6 +263,7 @@ public:
 #endif
 
     ActionsDAGPtr clone() const;
+    static ActionsDAGPtr cloneNode(const ActionsDAG::Node * node);
 
     /// Execute actions for header. Input block must have empty columns.
     /// Result should be equal to the execution of ExpressionActions built from this DAG.

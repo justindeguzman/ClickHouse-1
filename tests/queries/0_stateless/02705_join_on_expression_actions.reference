@@ -1,0 +1,24 @@
+left join
+a	A
+a	B
+a	C
+a	D
+a2	
+b	B
+b	C
+b	D
+c	C
+c	D
+d	D
+e	
+inner
+a	A
+a	B
+a	C
+a	D
+b	B
+b	C
+b	D
+c	C
+c	D
+d	D

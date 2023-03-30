@@ -1047,6 +1047,41 @@ ActionsDAGPtr ActionsDAG::clone() const
     return actions;
 }
 
+ActionsDAGPtr ActionsDAG::cloneNode(const ActionsDAG::Node * node)
+{
+    auto actions = std::make_shared<ActionsDAG>();
+    actions->project_input = false;
+    actions->projected_output = false;
+
+    std::unordered_map<const ActionsDAG::Node *, ActionsDAG::Node *> copy_map;
+
+    {
+        auto & copy_node = actions->nodes.emplace_back(*node);
+        copy_map[node] = &copy_node;
+    }
+
+    for (const auto & child : node->children)
+    {
+        auto & copy_node = actions->nodes.emplace_back(*child);
+        copy_map[child] = &copy_node;
+    }
+
+    for (auto & copy_node : actions->nodes)
+        for (auto & child : copy_node.children)
+            child = copy_map[child];
+
+    actions->outputs.push_back(copy_map[node]);
+
+    for (const auto & [_, child] : copy_map)
+    {
+        if (child->type == ActionType::INPUT)
+            actions->inputs.push_back(child);
+    }
+
+    return actions;
+}
+
+
 #if USE_EMBEDDED_COMPILER
 void ActionsDAG::compileExpressions(size_t min_count_to_compile_expression, const std::unordered_set<const ActionsDAG::Node *> & lazy_executed_nodes)
 {
@@ -2490,8 +2525,9 @@ ActionsDAGPtr ActionsDAG::buildFilterActionsDAG(
 
     if (result_dag_outputs.size() > 1 && single_output_condition_node)
     {
-        auto function_builder = FunctionFactory::instance().get("and", context);
-        result_dag_outputs = { &result_dag->addFunction(function_builder, result_dag_outputs, {}) };
+        UNUSED(context);
+        FunctionOverloadResolverPtr func_builder = std::make_unique<FunctionToOverloadResolverAdaptor>(std::make_shared<FunctionAnd>());
+        result_dag_outputs = { &result_dag->addFunction(func_builder, result_dag_outputs, {}) };
     }
 
     return result_dag;
