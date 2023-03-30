@@ -48,12 +48,10 @@ namespace Stage = BackupCoordinationStage;
 
 namespace
 {
-    std::shared_ptr<IBackupCoordination> makeBackupCoordination(const ContextPtr & context, const BackupSettings & backup_settings, bool remote)
+    std::shared_ptr<IBackupCoordination> makeBackupCoordination(const ContextPtr & context, const BackupsWorker::Settings & global_settings, const BackupSettings & backup_settings, bool remote)
     {
         if (remote)
         {
-            String root_zk_path = context->getConfigRef().getString("backups.zookeeper_path", "/clickhouse/backups");
-
             auto get_zookeeper = [global_context = context->getGlobalContext()] { return global_context->getZooKeeper(); };
 
             BackupCoordinationRemote::BackupKeeperSettings keeper_settings
@@ -69,7 +67,7 @@ namespace
 
             return std::make_shared<BackupCoordinationRemote>(
                 get_zookeeper,
-                root_zk_path,
+                global_settings.root_zookeeper_path,
                 keeper_settings,
                 toString(*backup_settings.backup_uuid),
                 all_hosts,
@@ -84,18 +82,16 @@ namespace
     }
 
     std::shared_ptr<IRestoreCoordination>
-    makeRestoreCoordination(const ContextPtr & context, const RestoreSettings & restore_settings, bool remote)
+    makeRestoreCoordination(const ContextPtr & context, const BackupsWorker::Settings & global_settings, const RestoreSettings & restore_settings, bool remote)
     {
         if (remote)
         {
-            String root_zk_path = context->getConfigRef().getString("backups.zookeeper_path", "/clickhouse/backups");
-
             auto get_zookeeper = [global_context = context->getGlobalContext()] { return global_context->getZooKeeper(); };
 
             auto all_hosts = BackupSettings::Util::filterHostIDs(
                 restore_settings.cluster_host_ids, restore_settings.shard_num, restore_settings.replica_num);
 
-            return std::make_shared<RestoreCoordinationRemote>(get_zookeeper, root_zk_path, toString(*restore_settings.restore_uuid), all_hosts, restore_settings.host_id, restore_settings.internal);
+            return std::make_shared<RestoreCoordinationRemote>(get_zookeeper, global_settings.root_zookeeper_path, toString(*restore_settings.restore_uuid), all_hosts, restore_settings.host_id, restore_settings.internal);
         }
         else
         {
@@ -161,12 +157,23 @@ namespace
 }
 
 
-BackupsWorker::BackupsWorker(size_t num_backup_threads, size_t num_restore_threads, bool allow_concurrent_backups_, bool allow_concurrent_restores_)
-    : backups_thread_pool(CurrentMetrics::BackupsThreads, CurrentMetrics::BackupsThreadsActive, num_backup_threads, /* max_free_threads = */ 0, num_backup_threads)
-    , restores_thread_pool(CurrentMetrics::RestoreThreads, CurrentMetrics::RestoreThreadsActive, num_restore_threads, /* max_free_threads = */ 0, num_restore_threads)
+BackupsWorker::BackupsWorker(const Settings & settings)
+    : global_settings(settings)
+    , backups_thread_pool(
+        CurrentMetrics::BackupsThreads,
+        CurrentMetrics::BackupsThreadsActive,
+        settings.num_backup_threads,
+        /* max_free_threads = */ 0,
+        settings.num_backup_threads)
+    , restores_thread_pool(
+        CurrentMetrics::RestoreThreads,
+        CurrentMetrics::RestoreThreadsActive,
+        settings.num_restore_threads,
+        /* max_free_threads = */ 0,
+        settings.num_restore_threads)
     , log(&Poco::Logger::get("BackupsWorker"))
-    , allow_concurrent_backups(allow_concurrent_backups_)
-    , allow_concurrent_restores(allow_concurrent_restores_)
+    , allow_concurrent_backups(settings.allow_concurrent_backups)
+    , allow_concurrent_restores(settings.allow_concurrent_restores)
 {
     /// We set max_free_threads = 0 because we don't want to keep any threads if there is no BACKUP or RESTORE query running right now.
 }
@@ -205,7 +212,7 @@ OperationID BackupsWorker::startMakingBackup(const ASTPtr & query, const Context
         /// The following call of makeBackupCoordination() is not essential because doBackup() will later create a backup coordination
         /// if it's not created here. However to handle errors better it's better to make a coordination here because this way
         /// if an exception will be thrown in startMakingBackup() other hosts will know about that.
-        backup_coordination = makeBackupCoordination(context, backup_settings, /* remote= */ true);
+        backup_coordination = makeBackupCoordination(context, global_settings, backup_settings, /* remote= */ true);
     }
 
     auto backup_info = BackupInfo::fromAST(*backup_query->backup_name);
@@ -310,7 +317,7 @@ void BackupsWorker::doBackup(
 
         /// Make a backup coordination.
         if (!backup_coordination)
-            backup_coordination = makeBackupCoordination(context, backup_settings, /* remote= */ on_cluster);
+            backup_coordination = makeBackupCoordination(context, global_settings, backup_settings, /* remote= */ on_cluster);
 
         if (!allow_concurrent_backups && backup_coordination->hasConcurrentBackups(std::ref(num_active_backups)))
             throw Exception(ErrorCodes::CONCURRENT_ACCESS_NOT_SUPPORTED, "Concurrent backups not supported, turn on setting 'allow_concurrent_backups'");
@@ -538,7 +545,7 @@ OperationID BackupsWorker::startRestoring(const ASTPtr & query, ContextMutablePt
         /// The following call of makeRestoreCoordination() is not essential because doRestore() will later create a restore coordination
         /// if it's not created here. However to handle errors better it's better to make a coordination here because this way
         /// if an exception will be thrown in startRestoring() other hosts will know about that.
-        restore_coordination = makeRestoreCoordination(context, restore_settings, /* remote= */ true);
+        restore_coordination = makeRestoreCoordination(context, global_settings, restore_settings, /* remote= */ true);
     }
 
     try
@@ -657,7 +664,7 @@ void BackupsWorker::doRestore(
 
         /// Make a restore coordination.
         if (!restore_coordination)
-            restore_coordination = makeRestoreCoordination(context, restore_settings, /* remote= */ on_cluster);
+            restore_coordination = makeRestoreCoordination(context, global_settings, restore_settings, /* remote= */ on_cluster);
 
         if (!allow_concurrent_restores && restore_coordination->hasConcurrentRestores(std::ref(num_active_restores)))
             throw Exception(ErrorCodes::CONCURRENT_ACCESS_NOT_SUPPORTED, "Concurrent restores not supported, turn on setting 'allow_concurrent_restores'");

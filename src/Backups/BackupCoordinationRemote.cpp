@@ -662,9 +662,18 @@ bool BackupCoordinationRemote::hasConcurrentBackups(const std::atomic<size_t> &)
             if (existing_backup_uuid == toString(backup_uuid))
                 continue;
 
-            const auto status = zk->get(root_zookeeper_path + "/" + existing_backup_path + "/stage");
+            const auto path_to_stage_for_current_backup = root_zookeeper_path + "/" + existing_backup_path + "/stage";
+            const auto status = zk->get(path_to_stage_for_current_backup);
             if (status != Stage::COMPLETED)
-                return true;
+            {
+                /// We also need to check whether there is at least one alive host
+                /// Because backup could be interrupted in the middle and then ClickHouse
+                /// will simply forget about it.
+                for (const auto & child : zk->getChildren(path_to_stage_for_current_backup))
+                    if (child.contains("alive"))
+                        return true;
+            }
+
         }
 
         zk->createIfNotExists(backup_stage_path, "");
