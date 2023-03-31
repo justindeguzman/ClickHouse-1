@@ -42,16 +42,19 @@ public:
         /// Result metadata for constructing the pipe.
         const Block header;
 
-        /// std::nullopt means that the associated entry can be read by other users. In general, sharing is a bad idea: First, it is
-        /// unlikely that different users pose the same queries. Second, sharing potentially breaches security. E.g. User A should not be
-        /// able to bypass row policies on some table by running the same queries as user B for whom no row policies exist.
-        const std::optional<String> username;
+        /// The user who executed the query.
+        const String username;
+
+        /// true means that the associated entry can be read by other users. In general, sharing is a bad idea: First, it is unlikely that
+        /// different users pose the same queries. Second, sharing potentially breaches security. E.g. User A should not be able to bypass
+        /// row policies on some table by running the same queries as user B for whom no row policies exist.
+        bool is_shared;
 
         /// When does the entry expire?
         const std::chrono::time_point<std::chrono::system_clock> expires_at;
 
         Key(ASTPtr ast_,
-            Block header_, const std::optional<String> & username_,
+            Block header_, const String & username_, bool is_shared,
             std::chrono::time_point<std::chrono::system_clock> expires_at_);
 
         bool operator==(const Key & other) const;

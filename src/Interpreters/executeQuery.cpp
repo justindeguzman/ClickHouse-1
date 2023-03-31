@@ -725,7 +725,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 {
                     QueryCache::Key key(
                         ast, res.pipeline.getHeader(),
-                        std::make_optional<String>(context->getUserName()),
+                        context->getUserName(),
+                        /*dummy*/ false,
                         std::chrono::system_clock::now() + std::chrono::seconds(settings.query_cache_ttl));
                     QueryCache::Reader reader = query_cache->createReader(key);
                     if (reader.hasCacheEntryForKey())
@@ -747,7 +748,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 {
                     QueryCache::Key key(
                         ast, res.pipeline.getHeader(),
-                        settings.query_cache_share_between_users ? std::nullopt : std::make_optional<String>(context->getUserName()),
+                        context->getUserName(),
+                        settings.query_cache_share_between_users,
                         std::chrono::system_clock::now() + std::chrono::seconds(settings.query_cache_ttl));
 
                     const size_t num_query_runs = query_cache->recordQueryRun(key);

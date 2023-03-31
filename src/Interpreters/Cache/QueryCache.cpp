@@ -122,11 +122,12 @@ ASTPtr removeQueryCacheSettings(ASTPtr ast)
 
 QueryCache::Key::Key(
     ASTPtr ast_,
-    Block header_, const std::optional<String> & username_,
+    Block header_, const String & username_, bool is_shared_,
     std::chrono::time_point<std::chrono::system_clock> expires_at_)
     : ast(removeQueryCacheSettings(ast_))
     , header(header_)
     , username(username_)
+    , is_shared(is_shared_)
     , expires_at(expires_at_)
 {
 }
@@ -237,7 +238,7 @@ QueryCache::Reader::Reader(Cache & cache_, const Key & key, const std::lock_guar
         return;
     }
 
-    if (entry->key.username.has_value() && entry->key.username != key.username)
+    if (!entry->key.is_shared && entry->key.username != key.username)
     {
         LOG_TRACE(&Poco::Logger::get("QueryCache"), "Inaccessible entry found for query {}", key.queryStringFromAst());
         return;
@@ -308,7 +309,7 @@ std::vector<QueryCache::Cache::KeyMapped> QueryCache::dump() const
 }
 
 QueryCache::QueryCache()
-    : cache(std::make_unique<TTLCachePolicy<Key, QueryResult, KeyHasher, QueryResultWeight, IsStale>>())
+    : cache(std::make_unique<TTLCachePolicy<Key, QueryResult, KeyHasher, QueryResultWeight, IsStale, PerUserTTLCacheQuotaPolicy>>())
 {
 }
 
@@ -324,6 +325,14 @@ void QueryCache::updateConfiguration(const Poco::Util::AbstractConfiguration & c
 
     max_entry_size_in_bytes = config.getUInt64("query_cache.max_entry_size", 1_MiB);
     max_entry_size_in_rows = config.getUInt64("query_cache.max_entry_rows", 30'000'000);
+
+    String user_name = "default";
+    String quota_config = "users." + user_name + ".query_cache_max_size";
+    bool has_quota = config.has(quota_config);
+    if (has_quota)
+    {
+        size_t quota = config.getUInt64(quota_config);
+    }
 }
 
 }

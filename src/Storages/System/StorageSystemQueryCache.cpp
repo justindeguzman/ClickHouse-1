@@ -40,14 +40,14 @@ void StorageSystemQueryCache::fillData(MutableColumns & res_columns, ContextPtr 
     for (const auto & [key, query_result] : content)
     {
         /// Showing other user's queries is considered a security risk
-        if (key.username.has_value() && key.username != username)
+        if (!key.is_shared && key.username != username)
             continue;
 
         res_columns[0]->insert(key.queryStringFromAst()); /// approximates the original query string
         res_columns[1]->insert(key.ast->getTreeHash().first);
         res_columns[2]->insert(std::chrono::system_clock::to_time_t(key.expires_at));
         res_columns[3]->insert(key.expires_at < std::chrono::system_clock::now());
-        res_columns[4]->insert(!key.username.has_value());
+        res_columns[4]->insert(key.is_shared);
         res_columns[5]->insert(QueryCache::QueryResultWeight()(*query_result));
     }
 }
