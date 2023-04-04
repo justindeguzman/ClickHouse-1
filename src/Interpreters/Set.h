@@ -35,6 +35,7 @@ public:
         : log(&Poco::Logger::get("Set")),
         limits(limits_), fill_set_elements(fill_set_elements_), transform_null_in(transform_null_in_)
     {
+        is_created_future = is_created_promise.get_future();
     }
 
     /** Set can be created either from AST or from a stream of data (subquery result).
@@ -50,10 +51,12 @@ public:
     bool insertFromBlock(const ColumnsWithTypeAndName & columns);
 
     /// Call after all blocks were inserted. To get the information that set is already created.
-    void finishInsert() { is_created = true; }
+    void finishInsert();
 
     /// finishInsert and isCreated are thread-safe
     bool isCreated() const { return is_created.load(); }
+
+    void waitForIsCreated() const;
 
     /** For columns of 'block', check belonging of corresponding rows to the set.
       * Return UInt8 column with the result.
@@ -68,7 +71,7 @@ public:
     const DataTypes & getElementsTypes() const { return set_elements_types; }
 
     bool hasExplicitSetElements() const { return fill_set_elements; }
-    Columns getSetElements() const { return { set_elements.begin(), set_elements.end() }; }
+    Columns getSetElements() const { waitForIsCreated(); return { set_elements.begin(), set_elements.end() }; }
 
     void checkColumnsNumber(size_t num_key_columns) const;
     bool areTypesEqual(size_t set_type_idx, const DataTypePtr & other_type) const;
@@ -116,6 +119,9 @@ private:
 
     /// Check if set contains all the data.
     std::atomic<bool> is_created = false;
+    std::promise<void> is_created_promise;
+    mutable std::mutex is_created_future_mutex;
+    mutable std::shared_future<void> is_created_future TSA_GUARDED_BY(is_created_future_mutex);
 
     /// If in the left part columns contains the same types as the elements of the set.
     void executeOrdinary(
