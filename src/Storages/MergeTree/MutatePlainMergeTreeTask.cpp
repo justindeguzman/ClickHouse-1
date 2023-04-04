@@ -56,7 +56,7 @@ void MutatePlainMergeTreeTask::prepare()
     fake_query_context->makeQueryContext();
     fake_query_context->setCurrentQueryId("");
 
-    /// Use PreparedSetsCache shared different tasks of this mutation.
+    /// Use PreparedSetsCache shared with other tasks of this mutation.
     auto mutation_id = future_part->part_info.mutation;
     auto prepared_sets_cache_for_mutation = storage.getPreparedSetsCache(mutation_id);
     fake_query_context->setPreparedSetsCache(prepared_sets_cache_for_mutation);
