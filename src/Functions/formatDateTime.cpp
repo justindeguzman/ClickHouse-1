@@ -152,14 +152,19 @@ private:
     class Instruction
     {
     public:
+        struct Params
+        {
+            bool f_prints_single_zero;
+        };
+
         /// Using std::function will cause performance degradation in MySQL format by 0.45x.
         /// But std::function is required for Joda format to capture extra variables.
         /// This is the reason why we use raw function pointer in MySQL format and std::function
         /// in Joda format.
         using Func = std::conditional_t<
             format_syntax == FormatDateTimeTraits::FormatSyntax::MySQL,
-            size_t (*)(char *, Time, UInt64, UInt32, const DateLUTImpl &),
-            std::function<size_t(char *, Time, UInt64, UInt32, const DateLUTImpl &)>>;
+            size_t (*)(char *, Time, UInt64, UInt32, const DateLUTImpl &, const Params &),
+            std::function<size_t(char *, Time, UInt64, UInt32, const DateLUTImpl &, const Params &)>>;
 
         Func func;
 
@@ -169,9 +174,9 @@ private:
         /// Instruction for appending date/time related number in specified format.
         explicit Instruction(Func && func_) : func(std::move(func_)) {}
 
-        void perform(char *& dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        void perform(char *& dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params & params)
         {
-            auto shift = func(dest, source, fractional_second, scale, timezone);
+            auto shift = func(dest, source, fractional_second, scale, timezone, params);
             dest += shift + extra_shift;
         }
 
@@ -257,21 +262,21 @@ private:
             return pos;
         }
     public:
-        static size_t mysqlNoop(char *, Time, UInt64, UInt32, const DateLUTImpl &) { return 0; }
+        static size_t mysqlNoop(char *, Time, UInt64, UInt32, const DateLUTImpl &, const Params &) { return 0; }
 
-        static size_t mysqlCentury(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlCentury(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto year = ToYearImpl::execute(source, timezone);
             auto century = year / 100;
             return writeNumber2(dest, century);
         }
 
-        static size_t mysqlDayOfMonth(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfMonth(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber2(dest, ToDayOfMonthImpl::execute(source, timezone));
         }
 
-        static size_t mysqlAmericanDate(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlAmericanDate(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             writeNumber2(dest, ToMonthImpl::execute(source, timezone));
             writeNumber2(dest + 3, ToDayOfMonthImpl::execute(source, timezone));
@@ -279,7 +284,7 @@ private:
             return 8;
         }
 
-        static size_t mysqlDayOfMonthSpacePadded(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfMonthSpacePadded(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto day = ToDayOfMonthImpl::execute(source, timezone);
             if (day < 10)
@@ -289,7 +294,7 @@ private:
             return 2;
         }
 
-        static size_t mysqlISO8601Date(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone) // NOLINT
+        static size_t mysqlISO8601Date(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &) // NOLINT
         {
             writeNumber4(dest, ToYearImpl::execute(source, timezone));
             writeNumber2(dest + 5, ToMonthImpl::execute(source, timezone));
@@ -297,12 +302,12 @@ private:
             return 10;
         }
 
-        static size_t mysqlDayOfYear(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfYear(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber3(dest, ToDayOfYearImpl::execute(source, timezone));
         }
 
-        static size_t mysqlMonth(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlMonth(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber2(dest, ToMonthImpl::execute(source, timezone));
         }
@@ -315,17 +320,17 @@ private:
             return str_view.size();
         }
 
-        static size_t mysqlMonthOfYearTextShort(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        static size_t mysqlMonthOfYearTextShort(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params &)
         {
             return monthOfYearText(dest, source, true, fractional_second, scale, timezone);
         }
 
-        static size_t mysqlMonthOfYearTextLong(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        static size_t mysqlMonthOfYearTextLong(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params &)
         {
             return monthOfYearText(dest, source, false, fractional_second, scale, timezone);
         }
 
-        static size_t mysqlDayOfWeek(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfWeek(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             *dest = '0' + ToDayOfWeekImpl::execute(source, 0, timezone);
             return 1;
@@ -342,65 +347,65 @@ private:
             return str_view.size();
         }
 
-        static size_t mysqlDayOfWeekTextShort(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfWeekTextShort(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params &)
         {
             return dayOfWeekText(dest, source, true, fractional_second, scale, timezone);
         }
 
-        static size_t mysqlDayOfWeekTextLong(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfWeekTextLong(char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params &)
         {
             return dayOfWeekText(dest, source, false, fractional_second, scale, timezone);
         }
 
-        static size_t mysqlDayOfWeek0To6(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlDayOfWeek0To6(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto day = ToDayOfWeekImpl::execute(source, 0, timezone);
             *dest = '0' + (day == 7 ? 0 : day);
             return 1;
         }
 
-        static size_t mysqlISO8601Week(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone) // NOLINT
+        static size_t mysqlISO8601Week(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &) // NOLINT
         {
             return writeNumber2(dest, ToISOWeekImpl::execute(source, timezone));
         }
 
-        static size_t mysqlISO8601Year2(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone) // NOLINT
+        static size_t mysqlISO8601Year2(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &) // NOLINT
         {
             return writeNumber2(dest, ToISOYearImpl::execute(source, timezone) % 100);
         }
 
-        static size_t mysqlISO8601Year4(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone) // NOLINT
+        static size_t mysqlISO8601Year4(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &) // NOLINT
         {
             return writeNumber4(dest, ToISOYearImpl::execute(source, timezone));
         }
 
-        static size_t mysqlYear2(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlYear2(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber2(dest, ToYearImpl::execute(source, timezone) % 100);
         }
 
-        static size_t mysqlYear4(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlYear4(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber4(dest, ToYearImpl::execute(source, timezone));
         }
 
-        static size_t mysqlHour24(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlHour24(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber2(dest, ToHourImpl::execute(source, timezone));
         }
 
-        static size_t mysqlHour12(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlHour12(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto x = ToHourImpl::execute(source, timezone);
             return writeNumber2(dest, x == 0 ? 12 : (x > 12 ? x - 12 : x));
         }
 
-        static size_t mysqlMinute(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlMinute(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber2(dest, ToMinuteImpl::execute(source, timezone));
         }
 
-        static size_t mysqlAMPM(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone) // NOLINT
+        static size_t mysqlAMPM(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &) // NOLINT
         {
             auto hour = ToHourImpl::execute(source, timezone);
             dest[0] = hour >= 12 ? 'P' : 'A';
@@ -408,14 +413,14 @@ private:
             return 2;
         }
 
-        static size_t mysqlHHMM24(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlHHMM24(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             writeNumber2(dest, ToHourImpl::execute(source, timezone));
             writeNumber2(dest + 3, ToMinuteImpl::execute(source, timezone));
             return 5;
         }
 
-        static size_t mysqlHHMM12(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlHHMM12(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto hour = ToHourImpl::execute(source, timezone);
             writeNumber2(dest, hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour));
@@ -425,16 +430,21 @@ private:
             return 8;
         }
 
-        static size_t mysqlSecond(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlSecond(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             return writeNumber2(dest, ToSecondImpl::execute(source, timezone));
         }
 
         static size_t
-        mysqlFractionalSecond(char * dest, Time /*source*/, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & /*timezone*/)
+        mysqlFractionalSecond(char * dest, Time /*source*/, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & /*timezone*/, const Params & params)
         {
             if (scale == 0)
-                scale = 1;
+            {
+                if (params.f_prints_single_zero)
+                    scale = 1;
+                else
+                    scale = 6;
+            }
 
             for (Int64 i = scale, value = fractional_second; i > 0; --i)
             {
@@ -444,7 +454,7 @@ private:
             return scale;
         }
 
-        static size_t mysqlISO8601Time(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone) // NOLINT
+        static size_t mysqlISO8601Time(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &) // NOLINT
         {
             writeNumber2(dest, ToHourImpl::execute(source, timezone));
             writeNumber2(dest + 3, ToMinuteImpl::execute(source, timezone));
@@ -452,7 +462,7 @@ private:
             return 8;
         }
 
-        static size_t mysqlTimezoneOffset(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlTimezoneOffset(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto offset = TimezoneOffsetImpl::execute(source, timezone);
             if (offset < 0)
@@ -466,20 +476,20 @@ private:
             return 5;
         }
 
-        static size_t mysqlQuarter(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t mysqlQuarter(char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             *dest = '0' + ToQuarterImpl::execute(source, timezone);
             return 1;
         }
 
         template <typename Literal>
-        static size_t jodaLiteral(const Literal & literal, char * dest, Time, UInt64, UInt32, const DateLUTImpl &)
+        static size_t jodaLiteral(const Literal & literal, char * dest, Time, UInt64, UInt32, const DateLUTImpl &, const Params &)
         {
             memcpy(dest, literal.data(), literal.size());
             return literal.size();
         }
 
-        static size_t jodaEra(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaEra(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto year = static_cast<Int32>(ToYearImpl::execute(source, timezone));
             String res;
@@ -492,14 +502,14 @@ private:
             return res.size();
         }
 
-        static size_t jodaCenturyOfEra(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaCenturyOfEra(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto year = static_cast<Int32>(ToYearImpl::execute(source, timezone));
             year = (year < 0 ? -year : year);
             return writeNumberWithPadding(dest, year / 100, min_represent_digits);
         }
 
-        static size_t jodaYearOfEra(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaYearOfEra(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto year = static_cast<Int32>(ToYearImpl::execute(source, timezone));
             if (min_represent_digits == 2)
@@ -511,19 +521,19 @@ private:
             }
         }
 
-        static size_t jodaDayOfWeek1Based(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaDayOfWeek1Based(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto week_day = ToDayOfWeekImpl::execute(source, 0, timezone);
             return writeNumberWithPadding(dest, week_day, min_represent_digits);
         }
 
-        static size_t jodaDayOfWeekText(size_t min_represent_digits, char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        static size_t jodaDayOfWeekText(size_t min_represent_digits, char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params &)
         {
             bool abbreviate = min_represent_digits <= 3;
             return dayOfWeekText(dest, source, abbreviate, fractional_second, scale, timezone);
         }
 
-        static size_t jodaYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto year = static_cast<Int32>(ToYearImpl::execute(source, timezone));
             if (min_represent_digits == 2)
@@ -536,87 +546,87 @@ private:
                 return writeNumberWithPadding(dest, year, min_represent_digits);
         }
 
-        static size_t jodaWeekYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaWeekYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto week_year = ToWeekYearImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, week_year, min_represent_digits);
         }
 
-        static size_t jodaWeekOfWeekYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaWeekOfWeekYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto week_of_weekyear = ToWeekOfWeekYearImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, week_of_weekyear, min_represent_digits);
         }
 
-        static size_t jodaDayOfYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaDayOfYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto day_of_year = ToDayOfYearImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, day_of_year, min_represent_digits);
         }
 
-        static size_t jodaMonthOfYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaMonthOfYear(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto month_of_year = ToMonthImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, month_of_year, min_represent_digits);
         }
 
-        static size_t jodaMonthOfYearText(size_t min_represent_digits, char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+        static size_t jodaMonthOfYearText(size_t min_represent_digits, char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params &)
         {
             bool abbreviate = min_represent_digits <= 3;
             return monthOfYearText(dest, source, abbreviate, fractional_second, scale, timezone);
         }
 
-        static size_t jodaDayOfMonth(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaDayOfMonth(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto day_of_month = ToDayOfMonthImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, day_of_month, min_represent_digits);
         }
 
         static size_t jodaHalfDayOfDay(
-            size_t /*min_represent_digits*/, char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone)
+            size_t /*min_represent_digits*/, char * dest, Time source, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & timezone, const Params & params)
         {
-            return mysqlAMPM(dest, source, fractional_second, scale, timezone);
+            return mysqlAMPM(dest, source, fractional_second, scale, timezone, params);
         }
 
-        static size_t jodaHourOfHalfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaHourOfHalfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto hour = ToHourImpl::execute(source, timezone) % 12;
             return writeNumberWithPadding(dest, hour, min_represent_digits);
         }
 
-        static size_t jodaClockHourOfHalfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaClockHourOfHalfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto hour = ToHourImpl::execute(source, timezone) ;
             hour = (hour + 11) % 12 + 1;
             return writeNumberWithPadding(dest, hour, min_represent_digits);
         }
 
-        static size_t jodaHourOfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaHourOfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto hour = ToHourImpl::execute(source, timezone) ;
             return writeNumberWithPadding(dest, hour, min_represent_digits);
         }
 
-        static size_t jodaClockHourOfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaClockHourOfDay(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto hour = ToHourImpl::execute(source, timezone);
             hour = (hour + 23) % 24 + 1;
             return writeNumberWithPadding(dest, hour, min_represent_digits);
         }
 
-        static size_t jodaMinuteOfHour(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaMinuteOfHour(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto minute_of_hour = ToMinuteImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, minute_of_hour, min_represent_digits);
         }
 
-        static size_t jodaSecondOfMinute(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaSecondOfMinute(size_t min_represent_digits, char * dest, Time source, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             auto second_of_minute = ToSecondImpl::execute(source, timezone);
             return writeNumberWithPadding(dest, second_of_minute, min_represent_digits);
         }
 
-        static size_t jodaFractionOfSecond(size_t min_represent_digits, char * dest, Time /*source*/, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & /*timezone*/)
+        static size_t jodaFractionOfSecond(size_t min_represent_digits, char * dest, Time /*source*/, UInt64 fractional_second, UInt32 scale, const DateLUTImpl & /*timezone*/, const Params &)
         {
             if (min_represent_digits > 9)
                 min_represent_digits = 9;
@@ -640,7 +650,7 @@ private:
             return min_represent_digits;
         }
 
-        static size_t jodaTimezone(size_t min_represent_digits, char * dest, Time /*source*/, UInt64, UInt32, const DateLUTImpl & timezone)
+        static size_t jodaTimezone(size_t min_represent_digits, char * dest, Time /*source*/, UInt64, UInt32, const DateLUTImpl & timezone, const Params &)
         {
             if (min_represent_digits <= 3)
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Short name time zone is not yet supported");
@@ -651,10 +661,17 @@ private:
         }
     };
 
+    const bool f_prints_single_zero;
+
 public:
     static constexpr auto name = Name::name;
 
-    static FunctionPtr create(ContextPtr) { return std::make_shared<FunctionFormatDateTimeImpl>(); }
+    static FunctionPtr create(ContextPtr context) { return std::make_shared<FunctionFormatDateTimeImpl>(context); }
+
+    explicit FunctionFormatDateTimeImpl(ContextPtr context)
+        : f_prints_single_zero(context->getSettings().formatdatetime_f_prints_single_zero)
+    {
+    }
 
     String getName() const override
     {
@@ -838,6 +855,7 @@ public:
 
         auto * begin = reinterpret_cast<char *>(dst_data.data());
         auto * pos = begin;
+        typename Instruction<T>::Params params{.f_prints_single_zero = f_prints_single_zero};
         for (size_t i = 0; i < vec.size(); ++i)
         {
             if constexpr (std::is_same_v<DataType, DataTypeDateTime64>)
@@ -845,13 +863,13 @@ public:
                 const auto c = DecimalUtils::split(vec[i], scale);
                 for (auto & instruction : instructions)
                 {
-                    instruction.perform(pos, static_cast<Int64>(c.whole), c.fractional, scale, time_zone);
+                    instruction.perform(pos, static_cast<Int64>(c.whole), c.fractional, scale, time_zone, params);
                 }
             }
             else
             {
                 for (auto & instruction : instructions)
-                    instruction.perform(pos, static_cast<UInt32>(vec[i]), 0, 0, time_zone);
+                    instruction.perform(pos, static_cast<UInt32>(vec[i]), 0, 0, time_zone, params);
             }
             *pos++ = '\0';
 
@@ -959,9 +977,12 @@ public:
                     // Fractional seconds
                     case 'f':
                     {
-                        /// If the time data type has no fractional part, then we print '0' as the fractional part.
+                        /// If the time data type has no fractional part, we print (default) '000000' or (deprecated) '0' as fractional part.
                         instructions.emplace_back(&Instruction<T>::mysqlFractionalSecond);
-                        out_template += String(std::max<UInt32>(1, scale), '0');
+                        if (f_prints_single_zero)
+                            out_template += String(std::max<UInt32>(1, scale), '0');
+                        else
+                            out_template += String(scale == 0 ? 6 : scale, '0');
                         break;
                     }
 
